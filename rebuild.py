@@ -3,19 +3,17 @@ import sys
 import numpy as np
 from math import pi,sqrt,e
 
+from matplotlib import pyplot as plt
+
+import load
+
 
 def k0(f):
-    return f*2*pi/3*pow(10,-8)
-
-def solve(matrix):
-    for i in range(len(matrix) - 1):
-        for j in range(len(matrix[0]) - 1):
-            if abs(matrix[i][j] - matrix[i + 1][j + 1])>pow(10,-7):
-                return False
-    return True
+    c=3*pow(10,8)
+    return f*2*pi/c
 
 class ProgressBar:
-    def __init__(self, total, length=50, title='building G'):
+    def __init__(self, total, length=50, title='building'):
         self.total = total
         self.length = length
         self.title = title
@@ -50,10 +48,11 @@ class GBuilder:
         self.gauss = [[-z,z,z,-z,0,z,0,-z,0],
                       [-z,-z,z,z,-z,0,z,0,0],
                       [25/324,25/324,25/324,25/324,40/324,40/324,40/324,40/324,64/324]]
+                      # [0, 0, 0, 0, 0, 0, 0, 0, 1]]
 
     def decode(self,num):
         xindex = num%self.xpoints
-        yindex = num//self.ypoints
+        yindex = num//self.xpoints
         return xindex,yindex
 
     # 矩量法
@@ -89,9 +88,9 @@ class GBuilder:
                 progress.update(i)
             np.save("G.npy", G)
 
-        return G
+        return np.array(G)
 
-# 共轭梯度法求解,E=GM
+# 共轭梯度法求解,E=GM,没用,这个只能解正定方程
 # https://blog.csdn.net/weixin_45933967/article/details/145704404
 def PCG(E,G):
     cnt = 0
@@ -112,11 +111,245 @@ def PCG(E,G):
         print(f"{cnt} rTr={rTr}")
     return x
 
+def diff(x,y):
+    diffsum=0
+    sum=0
+    for cnt in range(len(x)):
+        diffsum+=(abs(x[cnt]-y[cnt]))**2
+        sum+=abs(y[cnt])**2
+    return sqrt(diffsum/sum)
+
+
+class SourceRebuilder:
+
+    def __init__(self, E, H, h, f, xstep, ystep, xpoints, ypoints, hd=0.001):
+        self.E = E
+        self.H = H
+        self.h = h
+        self.f = f
+        self.hd = hd
+        self.xpoints = xpoints
+        self.ypoints = ypoints
+        self.xstep = xstep
+        self.ystep = ystep
+        self.xstep2 = xstep**2
+        self.ystep2 = ystep**2
+        self.k0 = k0(f)
+        self.gammaE = -1j*self.k0*377/(4*pi)
+        self.gammaH = self.k0/(4*pi)
+        self.Emax = np.max(np.abs(E))
+        self.Hmax = np.max(np.abs(H))
+
+    def r1(self, x0, x1, y0, y1):
+        return sqrt((x0-x1)**2*self.xstep2 + (y0-y1)**2*self.ystep2+self.h**2)
+    def r2(self, x0, x1, y0, y1):
+        return sqrt((x0-x1)**2*self.xstep2 + (y0-y1)**2*self.ystep2+(self.h+2*self.hd)**2)
+    def q(self,r):
+        if r > pow(10,5) or r ==-1:#远场
+            return -1,0,-1j
+        fr = e**(-1j*self.k0*r)/r
+        q1 = (3/(self.k0*r)**2 + 3j/(self.k0*r)-1)*fr
+        q2 = (2/(self.k0*r)**2 + 2j/(self.k0*r))*fr
+        q3 = (1/(self.k0*r)+1j)*fr
+        return q1,q2,q3
+
+    def Ts(self, x0, x1, y0, y1):
+        z = self.h+self.hd
+        hd = self.hd
+        gammaE = self.gammaE
+        gammaH = self.gammaH
+        k0 = self.k0
+        Emax = self.Emax
+        Hmax = self.Hmax
+        r1 = self.r1(x0, x1, y0, y1)
+        r2 = self.r2(x0, x1, y0, y1)
+        q11,q12,q13 = self.q(r1)
+        q21,q22,q23 = self.q(r2)
+
+        x0 = x0*self.xstep
+        x1 = x1*self.xstep
+        y0 = y0*self.ystep
+        y1 = y1*self.ystep
+
+        Texpz = gammaE*(
+            (z-hd)*(x0-x1)/r1**2*q11+
+            (z+hd)*(x0-x1)/r2**2*q21
+        )
+        Texmx = 0
+        Texmy = gammaE*k0*(
+            (z-hd)/r1*q13+
+            (z+hd)/r2*q23
+        )
+        Teypz = gammaE*(
+            (y0-y1)*(z-hd)/r1**2*q11+
+            (y0-y1)*(z+hd)/r2**2*q21
+        )
+        Teymx = gammaE*k0*(
+            -1*(z-hd)/r1*q13+
+            -1*(z+hd)/r2*q23
+        )
+        Teymy = 0
+        Thxpz = gammaH*(
+            -1*(y0-y1)/r1*q13+
+            -1*(y0-y1)/r2*q23
+        )
+        Thxmx = gammaH*k0*(
+            -1*((y0-y1)**2+(z-hd)**2)/r1**2*q11+
+            q12+
+            -1*((y0-y1)**2+(z+hd)**2)/r2**2*q21+
+            q22
+        )
+        Thxmy = gammaH*k0*(
+            (x0-x1)*(y0-y1)/r1**2*q11+
+            (x0-x1)*(y0-y1)/r2**2*q21
+        )
+        Thypz = gammaH*(
+            (x0-x1)/r1*q13+
+            (x0-x1)/r2*q23
+        )
+        Thymx = gammaH*k0*(
+            (x0-x1)*(y0-y1)/r1**2*q11+
+            (x0-x1)*(y0-y1)/r2**2*q21
+        )
+        Thymy = gammaH*k0*(
+            -1*((z-hd)**2+(x0-x1)**2)/r1**2*q11+
+            q12+
+            -1*((z+hd)**2+(x0-x1)**2)/r2**2*q21+
+            q22
+        )
+
+        return [Texpz/Emax,Texmx/(k0*Emax),Texmy/(k0*Emax),Teypz/Emax,Teymx/(k0*Emax),Teymy/(k0*Emax),\
+                Thxpz/Hmax,Thxmx/(k0*Hmax),Thxmy/(k0*Hmax),Thypz/Hmax,Thymx/(k0*Hmax),Thymy/(k0*Hmax)]
+
+    def T(self):
+        size=self.xpoints*self.ypoints
+        Tarray=np.zeros((size*4,size*3),dtype=complex)
+        bar = ProgressBar(size**2)
+        for x0 in range(self.xpoints):
+            for y0 in range(self.ypoints):
+                for x1 in range(self.xpoints):
+                    for y1 in range(self.ypoints):
+                        cnt = x0*size*self.ypoints+y0*size+x1*self.ypoints+y1
+                        mid = self.Ts(x0,x1,y0,y1)
+                        Tarray[x1*self.ypoints+y1,x0*self.ypoints+y0] = mid[0]
+                        Tarray[x1*self.ypoints+y1,x0*self.ypoints+y0+size] = mid[1]
+                        Tarray[x1*self.ypoints+y1,x0*self.ypoints+y0+size*2] = mid[2]
+                        Tarray[x1 * self.ypoints + y1+size, x0 * self.ypoints + y0] = mid[3]
+                        Tarray[x1 * self.ypoints + y1 + size, x0 * self.ypoints + y0+size] = mid[4]
+                        Tarray[x1 * self.ypoints + y1 + size, x0 * self.ypoints + y0+size] = mid[5]
+                        Tarray[x1 * self.ypoints + y1 + size*2, x0 * self.ypoints + y0] = mid[6]
+                        Tarray[x1 * self.ypoints + y1 + size * 2, x0 * self.ypoints + y0+size] = mid[7]
+                        Tarray[x1 * self.ypoints + y1 + size * 2, x0 * self.ypoints + y0+size*2] = mid[8]
+                        Tarray[x1 * self.ypoints + y1 + size * 3, x0 * self.ypoints + y0] = mid[9]
+                        Tarray[x1 * self.ypoints + y1 + size * 3, x0 * self.ypoints + y0 + size] = mid[10]
+                        Tarray[x1 * self.ypoints + y1 + size * 3, x0 * self.ypoints + y0 + size * 2] = mid[11]
+                        bar.update(cnt)
+        return Tarray
+
+    def solve(self, E, H, b=0.0001, save=False, limits=(5,1e-9),itera=True):
+        if save:
+            if os.path.isfile("T.npy"):
+                T = np.load("T.npy")
+                T = np.matrix(T)
+            else:
+                T = np.matrix(self.T())
+                np.save("T.npy", T)
+            if os.path.isfile("VH.npy") and os.path.isfile("S.npy") and os.path.isfile("U.npy"):
+                VH = np.matrix(np.load("VH.npy"))
+                U = np.matrix(np.load("U.npy"))
+                S = np.load("S.npy")
+            else:
+                U, S, VH = np.linalg.svd(T)
+                VH = np.matrix(VH)
+                np.save("S.npy", S)
+                np.save("VH.npy", VH)
+                np.save("U.npy", U)
+            if os.path.isfile("F.npy"):
+                F = np.load("F.npy")
+            else:
+                E = np.reshape([e[0:2] for e in E], (1, -1))
+                H = np.reshape([h[0:2] for h in H], (1, -1))
+                E = [e / self.Emax for e in E]
+                H = [h / self.Hmax for h in H]
+                F = np.reshape([E, H], (1, -1)).T
+                np.save("F.npy", F)
+        else:
+            T = np.matrix(self.T())
+            U, S, VH = np.linalg.svd(T)
+            VH = np.matrix(VH)
+            E = np.reshape([e[0:2] for e in E], (1, -1))
+            H = np.reshape([h[0:2] for h in H], (1, -1))
+            E = [e / self.Emax for e in E]
+            H = [h / self.Hmax for h in H]
+            F = np.reshape([E, H], (1, -1)).T
+            np.save("T.npy", T)
+            np.save("S.npy", S)
+            np.save("VH.npy", VH)
+            np.save("U.npy", U)
+            np.save("F.npy", F)
+
+        TH = T.H
+        V = np.array(VH.H)
+
+        if itera:
+            scope=[limits[0],(limits[0]+limits[1])/2,limits[1]]
+            tol=[-1]*3
+            mintor=1e5
+            midtor=1e5
+            cnt=0
+            while True:
+                for i in range(3):
+                    if tol[i]==-1:
+                        ambda=scope[i]*S[0]
+                        S_ = np.diag([1 / (xi ** 2 + ambda ** 2) for xi in S])
+                        X = V @ S_ @ VH @ TH @ F
+                        Fs = T @ X
+                        sigmaEx = diff(Fs[0:2601], F[0:2601])
+                        sigmaEy = diff(Fs[2601:5202], F[2601:5202])
+                        sigmaHx = diff(Fs[5202:7803], F[5202:7803])
+                        sigmaHy = diff(Fs[7803:10404], F[7803:10404])
+                        tol[i]=sigmaEx+sigmaEy+sigmaHx+sigmaHy
+                        print(f"for {scope[i]} tol: {tol[i]}\n"
+                              f"Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
+                    if tol[i]<mintor:
+                        midtor = mintor
+                        mintor = tol[i]
+                    elif mintor<tol[i]<midtor:
+                        midtor = tol[i]
+                if midtor!=tol[i] and mintor!=tol[i]:
+                    midtor = tol[i]
+                newmax = scope[tol.index(midtor)]
+                newmin = scope[tol.index(mintor)]
+                scope = [newmax, (newmin + newmax) / 2, newmin]
+                tol = [midtor, -1, mintor]
+                cnt += 1
+                if (midtor-mintor)<0.05:
+                    print(f"can't find best solution\nepoches:{cnt},scope:{scope},tol:{tol}")
+                    break
+                print(f"epoches:{cnt},scope:{scope},tol:{tol}")
+                if mintor<0.1:
+                    print(f"find best solution b={scope[2]} in {cnt} epoch,tolerance is {tol[2]}\n"
+                          f"Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
+                    break
+        else:
+            ambda = b*S[0]
+            S = np.diag([1/(xi**2+ambda**2) for xi in S])
+            X = V@S@VH@TH@F
+            Fs = T@X
+            sigmaEx = diff(Fs[0:2601],F[0:2601])
+            sigmaEy = diff(Fs[2601:5202], F[2601:5202])
+            sigmaHx = diff(Fs[5202:7803], F[5202:7803])
+            sigmaHy = diff(Fs[7803:10404], F[7803:10404])
+            print(sigmaEx,sigmaEy,sigmaHx,sigmaHy)
+
+        
+        
+
+
+
+
 
 if __name__ == "__main__":
-    E=[1,2]
-    G=[[1,2],[1,4]]
-    x = PCG(E, G)
-    print(x)
+    print(e)
 
 
