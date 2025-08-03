@@ -8,14 +8,16 @@ from far import Far
 
 
 if __name__ == "__main__":
-    dataloader = load.DataLoader(model=HFSS)
+    dataloader = load.DataLoader(path1_="nf_H.fld",path2_="nf_E.fld",model=HFSS)
     H,E,h = dataloader.get_data()
     rebuilder = SourceRebuilder(E,H,h,2.5e9, dataloader.xstep,dataloader.ystep,dataloader.xpoints,dataloader.ypoints)
     X=rebuilder.solve(E,H)
     np.save("X.npy",X)
     X=np.load("X.npy")
-    far = Far(X,rebuilder, 60,60)
-    far.near(5,"nf_E.fld")
+    far = Far(X,rebuilder)
+    dataloaderfar = load.DataLoader(path1_="nf_H_30mm.fld", path2_="nf_E_30mm.fld", model=HFSS)
+    H,E,h = dataloaderfar.get_data()
+    far.near(H,E,h)
 
 
 
