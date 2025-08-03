@@ -4,6 +4,7 @@ import numpy as np
 from math import pi,sqrt,e
 
 from matplotlib import pyplot as plt
+from unicodedata import normalize
 
 import load
 
@@ -129,6 +130,8 @@ class SourceRebuilder:
         self.f = f
         self.X = 0
         self.hd = hd
+        self.solvex=51
+        self.solvey=51
         self.xpoints = xpoints
         self.ypoints = ypoints
         self.xstep = xstep
@@ -136,18 +139,17 @@ class SourceRebuilder:
         self.xstep2 = xstep**2
         self.ystep2 = ystep**2
         self.k0 = k0(f)
-        self.gammaE = -1j*self.k0*120/4
+        self.gammaE = -1j*self.k0*120*pi/(4*pi)
         self.gammaH = self.k0/(4*pi)
         self.Emax = np.max(np.abs(E))
         self.Hmax = np.max(np.abs(H))
-        self.bias = [np.abs(bias) for bias in np.append(E,H)]
 
     def r1(self, x0, x1, y0, y1):
-        return sqrt((x0-x1)**2*self.xstep2 + (y0-y1)**2*self.ystep2+self.h**2)
+        return sqrt((x0-x1)**2 + (y0-y1)**2+self.h**2)
     def r2(self, x0, x1, y0, y1):
-        return sqrt((x0-x1)**2*self.xstep2 + (y0-y1)**2*self.ystep2+(self.h+2*self.hd)**2)
+        return sqrt((x0-x1)**2 + (y0-y1)**2+(self.h+2*self.hd)**2)
     def q(self,r):
-        if r > pow(10,5) or r ==-1:#远场
+        if r > pow(10,10) or r ==-1:#远场
             return -1,0,-1j
         fr = e**(-1j*self.k0*r)/r
         q1 = (3/(self.k0*r)**2 + 3j/(self.k0*r)-1)*fr
@@ -155,24 +157,25 @@ class SourceRebuilder:
         q3 = (1/(self.k0*r)+1j)*fr
         return q1,q2,q3
 
-    def Ts(self, x0, x1, y0, y1):
+    def Ts(self, x0, x1, y0, y1, normalize):
         z = self.h+self.hd
         hd = self.hd
         gammaE = self.gammaE
         gammaH = self.gammaH
         k0 = self.k0
+
+
+        x0 = x0*self.xstep
+        x1 = x1*self.xstep*self.xpoints/self.solvex
+        y0 = y0*self.ystep
+        y1 = y1*self.ystep*self.ypoints/self.solvey
         r1 = self.r1(x0, x1, y0, y1)
         r2 = self.r2(x0, x1, y0, y1)
         q11,q12,q13 = self.q(r1)
         q21,q22,q23 = self.q(r2)
 
-        x0 = x0*self.xstep
-        x1 = x1*self.xstep
-        y0 = y0*self.ystep
-        y1 = y1*self.ystep
-
-        Texpz = gammaE*(
-            (z-hd)*(x0-x1)/r1**2*q11+
+        Texpz = gammaE * (
+                (z - hd) * (x0 - x1) / r1 **2*q11+
             (z+hd)*(x0-x1)/r2**2*q21
         )
         Texmx = 0
@@ -217,44 +220,48 @@ class SourceRebuilder:
             -1*((z+hd)**2+(x0-x1)**2)/r2**2*q21+
             q22
         )
+        if normalize:
+            return [Texpz/self.Emax,Texmx/(k0*self.Emax),Texmy/(k0*self.Emax),Teypz/self.Emax,Teymx/(k0*self.Emax),Teymy/(k0*self.Emax),
+                    Thxpz/self.Hmax,Thxmx/(k0*self.Hmax),Thxmy/(k0*self.Hmax),Thypz/self.Hmax,Thymx/(k0*self.Hmax),Thymy/(k0*self.Hmax)]
+        else:
+            return [Texpz,Texmx/k0,Texmy/k0,Teypz,Teymx /k0,Teymy/k0,
+                    Thxpz,Thxmx/k0,Thxmy/k0,Thypz,Thymx/k0,Thymy/k0 ]
 
-        return [Texpz,Texmx/k0,Texmy/k0,Teypz,Teymx/k0,Teymy/k0,\
-                Thxpz,Thxmx/k0,Thxmy/k0,Thypz,Thymx/k0,Thymy/k0]
-
-    def T(self):
+    def T(self,normalize=True):
         size=self.xpoints*self.ypoints
-        Tarray=np.zeros((size*4,size*3),dtype=complex)
+        solvex=self.solvex
+        solvey=self.solvey
+        solvesize=solvex*solvey
+        Tarray=np.zeros((size*4,solvey*solvex*3),dtype=complex)
         bar = ProgressBar(size**2)
         for x0 in range(self.xpoints):
             for y0 in range(self.ypoints):
-                for x1 in range(60):
-                    for y1 in range(60):
-                        cnt = x0*size*self.ypoints+y0*size+x1*self.ypoints+y1
-                        mid = self.Ts(x0,x1,y0,y1)
-                        Tarray[x1*self.ypoints+y1,x0*self.ypoints+y0] = mid[0]
-                        Tarray[x1*self.ypoints+y1,x0*self.ypoints+y0+size] = mid[1]
-                        Tarray[x1*self.ypoints+y1,x0*self.ypoints+y0+size*2] = mid[2]
-                        Tarray[x1 * self.ypoints + y1+size, x0 * self.ypoints + y0] = mid[3]
-                        Tarray[x1 * self.ypoints + y1 + size, x0 * self.ypoints + y0+size] = mid[4]
-                        Tarray[x1 * self.ypoints + y1 + size, x0 * self.ypoints + y0+size] = mid[5]
-                        Tarray[x1 * self.ypoints + y1 + size*2, x0 * self.ypoints + y0] = mid[6]
-                        Tarray[x1 * self.ypoints + y1 + size * 2, x0 * self.ypoints + y0+size] = mid[7]
-                        Tarray[x1 * self.ypoints + y1 + size * 2, x0 * self.ypoints + y0+size*2] = mid[8]
-                        Tarray[x1 * self.ypoints + y1 + size * 3, x0 * self.ypoints + y0] = mid[9]
-                        Tarray[x1 * self.ypoints + y1 + size * 3, x0 * self.ypoints + y0 + size] = mid[10]
-                        Tarray[x1 * self.ypoints + y1 + size * 3, x0 * self.ypoints + y0 + size * 2] = mid[11]
+                for x1 in range(solvex):
+                    for y1 in range(solvey):
+                        cnt = x0*size*self.ypoints+y0*size+x1*solvey+y1
+                        mid = self.Ts(x0,x1,y0,y1,normalize)
+                        Tarray[x0*self.ypoints+y0,x1*solvey+y1] = mid[0]
+                        Tarray[x0*self.ypoints+y0,x1*solvey+y1+solvesize] = mid[1]
+                        Tarray[x0*self.ypoints+y0,x1*solvey+y1+solvesize*2] = mid[2]
+                        Tarray[x0 * self.ypoints + y0+size, x1*solvey+y1] = mid[3]
+                        Tarray[x0 * self.ypoints + y0+size, x1*solvey+y1+solvesize] = mid[4]
+                        Tarray[x0 * self.ypoints + y0+size, x1*solvey+y1+solvesize*2] = mid[5]
+                        Tarray[x0 * self.ypoints + y0+size*2, x1*solvey+y1] = mid[6]
+                        Tarray[x0 * self.ypoints + y0+size*2, x1*solvey+y1+solvesize] = mid[7]
+                        Tarray[x0 * self.ypoints + y0+size*2, x1*solvey+y1+solvesize*2] = mid[8]
+                        Tarray[x0 * self.ypoints + y0+size*3, x1 * solvey + y1] = mid[9]
+                        Tarray[x0 * self.ypoints + y0+size*3, x1*solvey+y1+solvesize] = mid[10]
+                        Tarray[x0 * self.ypoints + y0+size*3, x1*solvey+y1+solvesize*2] = mid[11]
                         bar.update(cnt)
 
         return Tarray
 
-    def solve(self, E, H, b=0.0001, save=True, limits=(5,1e-9),itera=True):
+    def solve(self, E, H, b=0, save=False, limits=(5,1e-9),itera=False):
         if save:
             if os.path.isfile("T.npy"):
-                T = np.load("T.npy")
-                T = np.matrix(T)
+                T = np.matrix(np.load("T.npy"))
             else:
-                T = np.matrix(self.T())
-                T = np.matrix([T[:][i] / self.bias[i] for i in range(len(T[:]))])
+                T = self.T(normalize=True)
                 np.save("T.npy", T)
             if os.path.isfile("VH.npy") and os.path.isfile("S.npy") and os.path.isfile("U.npy"):
                 VH = np.matrix(np.load("VH.npy"))
@@ -269,87 +276,88 @@ class SourceRebuilder:
             if os.path.isfile("F.npy"):
                 F = np.load("F.npy")
             else:
-                Ex = np.reshape([e[0] / abs(e[0]) for e in E], (1, -1))
-                Ey = np.reshape([e[1] / abs(e[1]) for e in E], (1, -1))
-                Hx = np.reshape([h[0] / abs(h[0]) for h in H], (1, -1))
-                Hy = np.reshape([h[1] / abs(h[1]) for h in H], (1, -1))
+                Ex = np.reshape([e[0] / self.Emax for e in E], (1, -1))
+                Ey = np.reshape([e[1] / self.Emax  for e in E], (1, -1))
+                Hx = np.reshape([h[0] / self.Hmax for h in H], (1, -1))
+                Hy = np.reshape([h[1] / self.Hmax for h in H], (1, -1))
                 E = np.append(Ex, Ey)
                 H = np.append(Hx, Hy)
                 F = np.reshape([E, H], (1, -1)).T
                 np.save("F.npy", F)
         else:
-            T = np.matrix(self.T())
-            T = np.matrix([T[:][i] / self.bias[i] for i in range(len(T[:]))])
-            U, S, VH = np.linalg.svd(T)
-            VH = np.matrix(VH)
-            Ex = np.reshape([e[0] / abs(e[0]) for e in E], (1, -1))
-            Ey = np.reshape([e[1] / abs(e[1]) for e in E], (1, -1))
-            Hx = np.reshape([h[0] / abs(h[0]) for h in H], (1, -1))
-            Hy = np.reshape([h[1] / abs(h[1]) for h in H], (1, -1))
+            T = np.matrix(self.T(normalize=True))
+            # U, S, VH = np.linalg.svd(T)
+            # VH = np.matrix(VH)
+            Ex = np.reshape([e[0] / self.Emax for e in E], (1, -1))
+            Ey = np.reshape([e[1] / self.Emax for e in E], (1, -1))
+            Hx = np.reshape([h[0] / self.Hmax for h in H], (1, -1))
+            Hy = np.reshape([h[1] / self.Hmax for h in H], (1, -1))
             E = np.append(Ex, Ey)
             H = np.append(Hx, Hy)
             F = np.reshape([E, H], (1, -1)).T
             np.save("T.npy", T)
-            np.save("S.npy", S)
-            np.save("VH.npy", VH)
-            np.save("U.npy", U)
+            # np.save("S.npy", S)
+            # np.save("VH.npy", VH)
+            # np.save("U.npy", U)
             np.save("F.npy", F)
 
-        TH = T.H
-        V = np.array(VH.H)
-
-        if itera:
-            scope=[limits[0],(limits[0]+limits[1])/2,limits[1]]
-            tol=[-1]*3
-            mintor=1e5
-            midtor=1e5
-            cnt=0
-            while True:
-                for i in range(3):
-                    if tol[i]==-1:
-                        ambda=scope[i]*S[0]
-                        S_ = np.diag([1 / (xi ** 2 + ambda ** 2) for xi in S])
-                        X = V @ S_ @ VH @ TH @ F
-                        Fs = T @ X
-                        sigmaEx = diff(Fs[0:2601], F[0:2601])
-                        sigmaEy = diff(Fs[2601:5202], F[2601:5202])
-                        sigmaHx = diff(Fs[5202:7803], F[5202:7803])
-                        sigmaHy = diff(Fs[7803:10404], F[7803:10404])
-                        tol[i]=sigmaEx+sigmaEy+sigmaHx+sigmaHy
-                        print(f"for {scope[i]} tol: {tol[i]}\n"
-                              f"Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
-                    if tol[i]<mintor:
-                        midtor = mintor
-                        mintor = tol[i]
-                    elif mintor<tol[i]<midtor:
-                        midtor = tol[i]
-                if midtor!=tol[i] and mintor!=tol[i]:
-                    midtor = tol[i]
-                newmax = scope[tol.index(midtor)]
-                newmin = scope[tol.index(mintor)]
-                scope = [newmax, (newmin + newmax) / 2, newmin]
-                tol = [midtor, -1, mintor]
-                cnt += 1
-                if (midtor-mintor)<0.05:
-                    print(f"can't find best solution\nepoches:{cnt},scope:{scope},tol:{tol}")
-                    break
-                print(f"epoches:{cnt},scope:{scope},tol:{tol}")
-                if mintor<0.1:
-                    print(f"find best solution b={scope[2]} in {cnt} epoch,tolerance is {tol[2]}\n"
-                          f"Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
-                    break
-        else:
-            ambda = b*S[0]
-            S = np.diag([1/(xi**2+ambda**2) for xi in S])
-            X = V@S@VH@TH@F
-            Fs = T@X
-            sigmaEx = diff(Fs[0:2601],F[0:2601])
-            sigmaEy = diff(Fs[2601:5202], F[2601:5202])
-            sigmaHx = diff(Fs[5202:7803], F[5202:7803])
-            sigmaHy = diff(Fs[7803:10404], F[7803:10404])
-            print(sigmaEx,sigmaEy,sigmaHx,sigmaHy)
-
-        self.X=X
+        # TH = T.H
+        # V = np.array(VH.H)
+        #
+        # if itera:
+        #     scope=[limits[0],(limits[0]+limits[1])/2,limits[1]]
+        #     tol=[-1]*3
+        #     mintor=1e5
+        #     midtor=1e5
+        #     cnt=0
+        #     while True:
+        #         for i in range(3):
+        #             if tol[i]==-1:
+        #                 ambda=scope[i]*S[0]
+        #                 S_ = np.diag([1 / (xi ** 2 + ambda ** 2) for xi in S])
+        #                 X = V @ S_ @ VH @ TH @ F
+        #                 Fs = T @ X
+        #                 sigmaEx = diff(Fs[0:2601], F[0:2601])
+        #                 sigmaEy = diff(Fs[2601:5202], F[2601:5202])
+        #                 sigmaHx = diff(Fs[5202:7803], F[5202:7803])
+        #                 sigmaHy = diff(Fs[7803:10404], F[7803:10404])
+        #                 tol[i]=diff(Fs,F)
+        #                 print(f"for {scope[i]} tol: {tol[i]}\n"
+        #                       f"Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
+        #             if tol[i]<mintor:
+        #                 midtor = mintor
+        #                 mintor = tol[i]
+        #             elif mintor<tol[i]<midtor:
+        #                 midtor = tol[i]
+        #         if midtor!=tol[i] and mintor!=tol[i]:
+        #             midtor = tol[i]
+        #         newmax = scope[tol.index(midtor)]
+        #         newmin = scope[tol.index(mintor)]
+        #         scope = [newmax, (newmin + newmax) / 2, newmin]
+        #         tol = [midtor, -1, mintor]
+        #         cnt += 1
+        #         if (midtor-mintor)<1e-12:
+        #             print(f"can't find best solution\nepoches:{cnt},scope:{scope},tol:{tol}")
+        #             break
+        #         print(f"epoches:{cnt},scope:{scope},tol:{tol}")
+        #         if mintor<0.1:
+        #             print(f"find best solution b={scope[2]} in {cnt} epoch,tolerance is {tol[2]}\n"
+        #                   f"Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
+        #             break
+        # else:
+        #     ambda = b*S[0]
+        #     S = np.diag([1/(xi**2+ambda**2) for xi in S])
+        #     X = V@S@VH@TH@F
+        #     Fs = T@X
+        #     sigmaEx = diff(Fs[0:2601],F[0:2601])
+        #     sigmaEy = diff(Fs[2601:5202], F[2601:5202])
+        #     sigmaHx = diff(Fs[5202:7803], F[5202:7803])
+        #     sigmaHy = diff(Fs[7803:10404], F[7803:10404])
+        #     print(sigmaEx,sigmaEy,sigmaHx,sigmaHy)
+        #
+        # self.X=X
+        T = np.array(T)
+        X = np.linalg.lstsq(T,F,rcond=None)[0]
         return X
 
 

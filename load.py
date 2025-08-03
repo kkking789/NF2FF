@@ -40,7 +40,7 @@ class DataLoader:
             else:
                 raise ValueError("(╬▔皿▔)╯Data source is different")
         elif model == HFSS:
-            with open(path1, "r") as file1:
+            with open(path1_, "r") as file1:
                 lines = file1.readlines()
                 for line in lines:
                     if line[0] == "G":
@@ -53,7 +53,7 @@ class DataLoader:
                     elif line[0] == "X":
                         continue
                     self.data1.append([float(mid) for mid in line.split()])
-            with open(path2, "r") as file2:
+            with open(path2_, "r") as file2:
                 lines = file2.readlines()
                 for line in lines:
                     if line[0] == "G" or line[0] == "X":
