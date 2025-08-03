@@ -4,8 +4,8 @@ import warnings
 from math import e
 import re
 
-path1 = r"array_H.fld"
-path2 = r"array_E.fld"
+path1 = r"nf_H.fld"
+path2 = r"nf_E.fld"
 MATLAB = "matlab"
 HFSS = "hfss"
 
@@ -98,8 +98,9 @@ class DataLoader:
 
             return np.array(pol1_data), np.array(pol2_data), self.frequency[fpoint]
         elif self.model == HFSS:
-            comH = [(data[3]*e**(data[4]*1j),data[5]*e**(data[6]*1j),data[7]*e**(data[8]*1j)) for data in self.data1]
-            comE = [(data[3]*e**(data[4]*1j),data[5]*e**(data[6]*1j),data[7]*e**(data[8]*1j)) for data in self.data2]
+            comH = [(data[3]*e**(data[4]*1j),data[5]*e**(data[6]*1j)) for data in self.data1]
+            comE = [(data[3]*e**(data[4]*1j),data[5]*e**(data[6]*1j)) for data in self.data2]
+
             return comH,comE, self.data1[0][2]
 
 

@@ -4,13 +4,18 @@ import numpy as np
 from rebuild import GBuilder,PCG, SourceRebuilder
 import seaborn as sns
 import matplotlib.pyplot as plt
+from far import Far
 
 
 if __name__ == "__main__":
     dataloader = load.DataLoader(model=HFSS)
     H,E,h = dataloader.get_data()
     rebuilder = SourceRebuilder(E,H,h,2.5e9, dataloader.xstep,dataloader.ystep,dataloader.xpoints,dataloader.ypoints)
-    rebuilder.solve(E,H)
+    X=rebuilder.solve(E,H)
+    np.save("X.npy",X)
+    X=np.load("X.npy")
+    far = Far(X,rebuilder, 60,60)
+    far.near(5,"nf_E.fld")
 
 
 

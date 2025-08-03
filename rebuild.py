@@ -127,6 +127,7 @@ class SourceRebuilder:
         self.H = H
         self.h = h
         self.f = f
+        self.X = 0
         self.hd = hd
         self.xpoints = xpoints
         self.ypoints = ypoints
@@ -135,10 +136,11 @@ class SourceRebuilder:
         self.xstep2 = xstep**2
         self.ystep2 = ystep**2
         self.k0 = k0(f)
-        self.gammaE = -1j*self.k0*377/(4*pi)
+        self.gammaE = -1j*self.k0*120/4
         self.gammaH = self.k0/(4*pi)
         self.Emax = np.max(np.abs(E))
         self.Hmax = np.max(np.abs(H))
+        self.bias = [np.abs(bias) for bias in np.append(E,H)]
 
     def r1(self, x0, x1, y0, y1):
         return sqrt((x0-x1)**2*self.xstep2 + (y0-y1)**2*self.ystep2+self.h**2)
@@ -159,8 +161,6 @@ class SourceRebuilder:
         gammaE = self.gammaE
         gammaH = self.gammaH
         k0 = self.k0
-        Emax = self.Emax
-        Hmax = self.Hmax
         r1 = self.r1(x0, x1, y0, y1)
         r2 = self.r2(x0, x1, y0, y1)
         q11,q12,q13 = self.q(r1)
@@ -218,8 +218,8 @@ class SourceRebuilder:
             q22
         )
 
-        return [Texpz/Emax,Texmx/(k0*Emax),Texmy/(k0*Emax),Teypz/Emax,Teymx/(k0*Emax),Teymy/(k0*Emax),\
-                Thxpz/Hmax,Thxmx/(k0*Hmax),Thxmy/(k0*Hmax),Thypz/Hmax,Thymx/(k0*Hmax),Thymy/(k0*Hmax)]
+        return [Texpz,Texmx/k0,Texmy/k0,Teypz,Teymx/k0,Teymy/k0,\
+                Thxpz,Thxmx/k0,Thxmy/k0,Thypz,Thymx/k0,Thymy/k0]
 
     def T(self):
         size=self.xpoints*self.ypoints
@@ -227,8 +227,8 @@ class SourceRebuilder:
         bar = ProgressBar(size**2)
         for x0 in range(self.xpoints):
             for y0 in range(self.ypoints):
-                for x1 in range(self.xpoints):
-                    for y1 in range(self.ypoints):
+                for x1 in range(60):
+                    for y1 in range(60):
                         cnt = x0*size*self.ypoints+y0*size+x1*self.ypoints+y1
                         mid = self.Ts(x0,x1,y0,y1)
                         Tarray[x1*self.ypoints+y1,x0*self.ypoints+y0] = mid[0]
@@ -244,15 +244,17 @@ class SourceRebuilder:
                         Tarray[x1 * self.ypoints + y1 + size * 3, x0 * self.ypoints + y0 + size] = mid[10]
                         Tarray[x1 * self.ypoints + y1 + size * 3, x0 * self.ypoints + y0 + size * 2] = mid[11]
                         bar.update(cnt)
+
         return Tarray
 
-    def solve(self, E, H, b=0.0001, save=False, limits=(5,1e-9),itera=True):
+    def solve(self, E, H, b=0.0001, save=True, limits=(5,1e-9),itera=True):
         if save:
             if os.path.isfile("T.npy"):
                 T = np.load("T.npy")
                 T = np.matrix(T)
             else:
                 T = np.matrix(self.T())
+                T = np.matrix([T[:][i] / self.bias[i] for i in range(len(T[:]))])
                 np.save("T.npy", T)
             if os.path.isfile("VH.npy") and os.path.isfile("S.npy") and os.path.isfile("U.npy"):
                 VH = np.matrix(np.load("VH.npy"))
@@ -267,20 +269,25 @@ class SourceRebuilder:
             if os.path.isfile("F.npy"):
                 F = np.load("F.npy")
             else:
-                E = np.reshape([e[0:2] for e in E], (1, -1))
-                H = np.reshape([h[0:2] for h in H], (1, -1))
-                E = [e / self.Emax for e in E]
-                H = [h / self.Hmax for h in H]
+                Ex = np.reshape([e[0] / abs(e[0]) for e in E], (1, -1))
+                Ey = np.reshape([e[1] / abs(e[1]) for e in E], (1, -1))
+                Hx = np.reshape([h[0] / abs(h[0]) for h in H], (1, -1))
+                Hy = np.reshape([h[1] / abs(h[1]) for h in H], (1, -1))
+                E = np.append(Ex, Ey)
+                H = np.append(Hx, Hy)
                 F = np.reshape([E, H], (1, -1)).T
                 np.save("F.npy", F)
         else:
             T = np.matrix(self.T())
+            T = np.matrix([T[:][i] / self.bias[i] for i in range(len(T[:]))])
             U, S, VH = np.linalg.svd(T)
             VH = np.matrix(VH)
-            E = np.reshape([e[0:2] for e in E], (1, -1))
-            H = np.reshape([h[0:2] for h in H], (1, -1))
-            E = [e / self.Emax for e in E]
-            H = [h / self.Hmax for h in H]
+            Ex = np.reshape([e[0] / abs(e[0]) for e in E], (1, -1))
+            Ey = np.reshape([e[1] / abs(e[1]) for e in E], (1, -1))
+            Hx = np.reshape([h[0] / abs(h[0]) for h in H], (1, -1))
+            Hy = np.reshape([h[1] / abs(h[1]) for h in H], (1, -1))
+            E = np.append(Ex, Ey)
+            H = np.append(Hx, Hy)
             F = np.reshape([E, H], (1, -1)).T
             np.save("T.npy", T)
             np.save("S.npy", S)
@@ -341,6 +348,12 @@ class SourceRebuilder:
             sigmaHx = diff(Fs[5202:7803], F[5202:7803])
             sigmaHy = diff(Fs[7803:10404], F[7803:10404])
             print(sigmaEx,sigmaEy,sigmaHx,sigmaHy)
+
+        self.X=X
+        return X
+
+
+    # def far(self):
 
         
         
