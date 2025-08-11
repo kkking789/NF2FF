@@ -1,376 +1,188 @@
-import os
+import os.path
 import sys
+import math
+from math import e
 import numpy as np
-from math import pi,sqrt,e
-
-from matplotlib import pyplot as plt
-from unicodedata import normalize
-
-import load
-
-
-def k0(f):
-    c=3*pow(10,8)
-    return f*2*pi/c
+import pyswarms as ps
 
 class ProgressBar:
-    def __init__(self, total, length=50, title='building'):
-        self.total = total
-        self.length = length
-        self.title = title
+	def __init__(self, total, length=50, title='building'):
+		self.total = total
+		self.length = length
+		self.title = title
+		self.progress = 0
 
-    def update(self, progress):
-        percent = "{0:.1f}".format(100 * (progress / float(self.total)))
-        filled_length = int(self.length * progress // self.total)+1
+	def update(self):
+		progress = self.progress
+		percent = "{0:.1f}".format(100 * (progress / float(self.total)))
+		filled_length = int(self.length * progress // self.total)+1
 
-        GREEN = '\033[92m'
-        RED = '\033[91m'
-        RESET = '\033[0m'
+		GREEN = '\033[92m'
+		RED = '\033[91m'
+		RESET = '\033[0m'
 
-        filled = GREEN + '-' * filled_length + RESET
-        unfilled = RED + '-' * (self.length - filled_length) + RESET
-        bar = filled + unfilled
+		filled = GREEN + '-' * filled_length + RESET
+		unfilled = RED + '-' * (self.length - filled_length) + RESET
+		bar = filled + unfilled
 
-        sys.stdout.write(f'\r{self.title} {bar} {percent}% (￣o￣) . z Z')
-        if percent == "100.0":
-            sys.stdout.write(f'\r{self.title} {bar} {percent}% ╰(*°▽°*)╯')
-        sys.stdout.flush()
+		sys.stdout.write(f'\r{self.title} {bar} {percent}% (￣o￣) . z Z')
+		if percent == "100.0":
+			sys.stdout.write(f'\r{self.title} {bar} {percent}% ╰(*°▽°*)╯')
+		sys.stdout.flush()
+		self.progress+=1
 
-class GBuilder:
-    def __init__(self, xstep, ystep, xpoints, ypoints, h):
-        self.xstep = xstep
-        self.ystep = ystep
-        self.xpoints = int(xpoints)
-        self.ypoints = int(ypoints)
-        self.h = h
-        self.m = np.full((self.xpoints,self.ypoints),-1,dtype=complex)
+class Grid:
+	def __init__(self,xstep,ystep,xpoints,ypoints):
+		self.xstep = xstep
+		self.ystep = ystep
+		self.xpoints = xpoints
+		self.ypoints = ypoints
+		self.total = xpoints*ypoints
 
-        z = sqrt(float(3/5))/0.5
-        self.gauss = [[-z,z,z,-z,0,z,0,-z,0],
-                      [-z,-z,z,z,-z,0,z,0,0],
-                      [25/324,25/324,25/324,25/324,40/324,40/324,40/324,40/324,64/324]]
-                      # [0, 0, 0, 0, 0, 0, 0, 0, 1]]
+class Rebuilder:
+	def __init__(self,E,H,h,xstep,ystep,xpoints,ypoints, dxpoints, dypoints,f,hg=0.002):
+		self.k = 2 * math.pi * f / 3e8
+		self.K_h = self.k / (4 * math.pi)
+		self.measure = Grid(xstep,ystep,xpoints,ypoints)
+		self.rebuild = Grid(xstep*xpoints/dxpoints,ystep*ypoints/dypoints,dxpoints,dypoints)
+		self.A = np.zeros((3 * self.measure.total, 2 * self.rebuild.total), dtype=complex)
+		self.h = hg #重构点离地高度
+		self.E = E
+		self.H = H
 
-    def decode(self,num):
-        xindex = num%self.xpoints
-        yindex = num//self.xpoints
-        return xindex,yindex
+		self.x = 0
+		self.y = 0
+		self.z = h
+		self.r1 = 0
+		self.r2 = 0
+		self.G1r1 = 0
+		self.G1r2 = 0
+		self.G2r1 = 0
+		self.G2r2 = 0
 
-    # 矩量法
-    def mom(self, num, freq):
-        g=[]
+	def r(self):
+		x = self.x
+		y = self.y
+		z = self.z
+		h = self.h
+		self.r1 = math.sqrt(x ** 2 + y ** 2 + (z - h) ** 2)
+		self.r2 = math.sqrt(x ** 2 + y ** 2 + (z + h) ** 2)
 
-        xindex_,yindex_=self.decode(num)
-        for i in range(0,self.xpoints*self.ypoints):
-            xindex,yindex=self.decode(i)
-            xdiff = abs(xindex-xindex_)
-            ydiff = abs(yindex-yindex_)
-            gblock = 0
-            if self.m[xdiff,ydiff] == -1 and self.m[ydiff,xdiff] == -1:
-                #高斯数值积分
-                for j in range(0,9):
-                    r = sqrt(pow((xindex_-xindex+self.gauss[0][j])*self.xstep,2)+pow((yindex_-yindex+self.gauss[1][j])*self.ystep,2)+pow(self.h,2))
-                    gblock += pow(e,-1*k0(freq)*r*1j)/(4*pi*pow(r,2))*(k0(freq)*1j+1/r)*self.h*-1*self.gauss[2][j]
-                self.m[xdiff,ydiff] = gblock
-            else:
-                gblock = self.m[xdiff,ydiff] if self.m[xdiff,ydiff]!=-1 else self.m[ydiff,xdiff]
-            g.append(gblock)
+	def G(self):
+		k = self.k
+		r1 = self.r1
+		r2 = self.r2
 
-        return g
+		def f(r):
+			return e**(-1j * k * r) / r
 
-    def build(self, freq):
-        G=[]
-        if os.path.isfile("G.npy"):
-            G = np.load("G.npy")
-        else:
-            progress = ProgressBar(self.xpoints*self.ypoints)
-            for i in range(0,self.xpoints*self.ypoints):
-                G.append(self.mom(i, freq))
-                progress.update(i)
-            np.save("G.npy", G)
+		def G1(r):
+			return (3 / ((k * r) ** 2) + 1j * 3 / (k * r) - 1) * f(r)
 
-        return np.array(G)
+		def G2(r):
+			return (2 / ((k * r) ** 2 + 1j * 2 / (k * r))) * f(r)
 
-# 共轭梯度法求解,E=GM,没用,这个只能解正定方程
-# https://blog.csdn.net/weixin_45933967/article/details/145704404
-def PCG(E,G):
-    cnt = 0
-    E = np.array(E)
-    G = np.array(G)
-    x = np.full(G.shape[1],0,dtype=complex)
-    r = E-np.dot(G,x)
-    rTr = np.vdot(r, r)
-    p = E-np.dot(G,x)
-    while rTr.real > 0.0001 and cnt <21:
-        alpha = rTr/np.vdot(p,np.dot(G,p))
-        x = x +alpha*p
-        r = E-np.dot(G,x)
-        beta = -1*np.vdot(r, r)/rTr
-        p = r+beta*p
-        rTr = np.vdot(r, r)
-        cnt+=1
-        print(f"{cnt} rTr={rTr}")
-    return x
-
-def diff(x,y):
-    diffsum=0
-    sum=0
-    for cnt in range(len(x)):
-        diffsum+=(abs(x[cnt]-y[cnt]))**2
-        sum+=abs(y[cnt])**2
-    return sqrt(diffsum/sum)
+		self.G1r1 = G1(r1)
+		self.G1r2 = G1(r2)
+		self.G2r1 = G2(r1)
+		self.G2r2 = G2(r2)
 
 
-class SourceRebuilder:
+	def A_build(self):
+		measure = self.measure  # 测量点网格
+		rebuild = self.rebuild  # 重建点网格
+		K_h = self.K_h
+		k = self.k
+		A = np.zeros((3 * measure.total, 2 * rebuild.total), dtype=complex)
 
-    def __init__(self, E, H, h, f, xstep, ystep, xpoints, ypoints, hd=0.001):
-        self.E = E
-        self.H = H
-        self.h = h
-        self.f = f
-        self.X = 0
-        self.hd = hd
-        self.solvex=51
-        self.solvey=51
-        self.xpoints = xpoints
-        self.ypoints = ypoints
-        self.xstep = xstep
-        self.ystep = ystep
-        self.xstep2 = xstep**2
-        self.ystep2 = ystep**2
-        self.k0 = k0(f)
-        self.gammaE = -1j*self.k0*120*pi/(4*pi)
-        self.gammaH = self.k0/(4*pi)
-        self.Emax = np.max(np.abs(E))
-        self.Hmax = np.max(np.abs(H))
+		if os.path.isfile("tmp\A.npy"):
+			self.A = np.load("tmp\A.npy")
+			if self.A.shape[1] == 2 * rebuild.total:
+				return
+		progressbar = ProgressBar(measure.total*rebuild.total)
+		for M in range(measure.ypoints):
+			for N in range(measure.xpoints):
+				for m in range(rebuild.ypoints):
+					for n in range(rebuild.xpoints):
+						self.x = M * measure.xstep - n * rebuild.xstep
+						self.y = N * measure.ystep - m * rebuild.ystep
+						self.r()
+						self.G()
+						x = self.x
+						y = self.y
+						z = self.z
+						h = self.h
+						r1 = self.r1
+						r2 = self.r2
+						G1r1 = self.G1r1
+						G2r2 = self.G2r2
+						G1r2 = self.G1r2
+						G2r1 = self.G2r1
+						A_HxMx = K_h * k * (-1 * (y ** 2 + (z - h) ** 2) / (r1 ** 2) * G1r1 + G2r1
+											- 1 * (y ** 2 + (z + h) ** 2) / (r2 ** 2) * G1r2 + G2r2)
+						A_HxMy = K_h * k * ((x * y) / (r1 ** 2) * G1r1
+											+ (x * y) / (r2 ** 2) * G1r2)
+						A_HyMx = K_h * k * ((x * y) / (r1 ** 2) * G1r1
+											+ (x * y) / (r2 ** 2) * G1r2)
+						A_HyMy = K_h * k * (-1 * ((z - h) ** 2 + x ** 2) / (r1 ** 2) * G1r1 + G2r1
+											- 1 * ((z + h) ** 2 + x ** 2) / (r2 ** 2) * G1r2 + G2r2)
+						A_HzMx = K_h * k * ((z - h) * x / r1 ** 2 * G1r1 + (z + h) * x / r2 ** 2 * G1r2)
+						A_HzMy = K_h * k * ((z - h) * y / r1 ** 2 * G1r1 + (z + h) * y / r2 ** 2 * G1r2)
 
-    def r1(self, x0, x1, y0, y1):
-        return sqrt((x0-x1)**2 + (y0-y1)**2+self.h**2)
-    def r2(self, x0, x1, y0, y1):
-        return sqrt((x0-x1)**2 + (y0-y1)**2+(self.h+2*self.hd)**2)
-    def q(self,r):
-        if r > pow(10,10) or r ==-1:#远场
-            return -1,0,-1j
-        fr = e**(-1j*self.k0*r)/r
-        q1 = (3/(self.k0*r)**2 + 3j/(self.k0*r)-1)*fr
-        q2 = (2/(self.k0*r)**2 + 2j/(self.k0*r))*fr
-        q3 = (1/(self.k0*r)+1j)*fr
-        return q1,q2,q3
+						A[M * measure.xpoints + N][m * rebuild.xpoints + n] = A_HxMx
+						A[M * measure.xpoints + N][m * rebuild.xpoints + n + rebuild.total] = A_HxMy
+						A[M * measure.xpoints + N + measure.total][m * rebuild.xpoints + n] = A_HyMx
+						A[M * measure.xpoints + N + measure.total][m * rebuild.xpoints + n + rebuild.total] = A_HyMy
+						A[M * measure.xpoints + N + measure.total * 2][m * rebuild.xpoints + n] = A_HzMx
+						A[M * measure.xpoints + N + measure.total * 2][m * rebuild.xpoints + n + rebuild.total] = A_HzMy
 
-    def Ts(self, x0, x1, y0, y1, normalize):
-        z = self.h+self.hd
-        hd = self.hd
-        gammaE = self.gammaE
-        gammaH = self.gammaH
-        k0 = self.k0
+						progressbar.update()
 
-
-        x0 = x0*self.xstep
-        x1 = x1*self.xstep*self.xpoints/self.solvex
-        y0 = y0*self.ystep
-        y1 = y1*self.ystep*self.ypoints/self.solvey
-        r1 = self.r1(x0, x1, y0, y1)
-        r2 = self.r2(x0, x1, y0, y1)
-        q11,q12,q13 = self.q(r1)
-        q21,q22,q23 = self.q(r2)
-
-        Texpz = gammaE * (
-                (z - hd) * (x0 - x1) / r1 **2*q11+
-            (z+hd)*(x0-x1)/r2**2*q21
-        )
-        Texmx = 0
-        Texmy = gammaE*k0*(
-            (z-hd)/r1*q13+
-            (z+hd)/r2*q23
-        )
-        Teypz = gammaE*(
-            (y0-y1)*(z-hd)/r1**2*q11+
-            (y0-y1)*(z+hd)/r2**2*q21
-        )
-        Teymx = gammaE*k0*(
-            -1*(z-hd)/r1*q13+
-            -1*(z+hd)/r2*q23
-        )
-        Teymy = 0
-        Thxpz = gammaH*(
-            -1*(y0-y1)/r1*q13+
-            -1*(y0-y1)/r2*q23
-        )
-        Thxmx = gammaH*k0*(
-            -1*((y0-y1)**2+(z-hd)**2)/r1**2*q11+
-            q12+
-            -1*((y0-y1)**2+(z+hd)**2)/r2**2*q21+
-            q22
-        )
-        Thxmy = gammaH*k0*(
-            (x0-x1)*(y0-y1)/r1**2*q11+
-            (x0-x1)*(y0-y1)/r2**2*q21
-        )
-        Thypz = gammaH*(
-            (x0-x1)/r1*q13+
-            (x0-x1)/r2*q23
-        )
-        Thymx = gammaH*k0*(
-            (x0-x1)*(y0-y1)/r1**2*q11+
-            (x0-x1)*(y0-y1)/r2**2*q21
-        )
-        Thymy = gammaH*k0*(
-            -1*((z-hd)**2+(x0-x1)**2)/r1**2*q11+
-            q12+
-            -1*((z+hd)**2+(x0-x1)**2)/r2**2*q21+
-            q22
-        )
-        if normalize:
-            return [Texpz/self.Emax,Texmx/(k0*self.Emax),Texmy/(k0*self.Emax),Teypz/self.Emax,Teymx/(k0*self.Emax),Teymy/(k0*self.Emax),
-                    Thxpz/self.Hmax,Thxmx/(k0*self.Hmax),Thxmy/(k0*self.Hmax),Thypz/self.Hmax,Thymx/(k0*self.Hmax),Thymy/(k0*self.Hmax)]
-        else:
-            return [Texpz,Texmx/k0,Texmy/k0,Teypz,Teymx /k0,Teymy/k0,
-                    Thxpz,Thxmx/k0,Thxmy/k0,Thypz,Thymx/k0,Thymy/k0 ]
-
-    def T(self,normalize=True):
-        size=self.xpoints*self.ypoints
-        solvex=self.solvex
-        solvey=self.solvey
-        solvesize=solvex*solvey
-        Tarray=np.zeros((size*4,solvey*solvex*3),dtype=complex)
-        bar = ProgressBar(size**2)
-        for x0 in range(self.xpoints):
-            for y0 in range(self.ypoints):
-                for x1 in range(solvex):
-                    for y1 in range(solvey):
-                        cnt = x0*size*self.ypoints+y0*size+x1*solvey+y1
-                        mid = self.Ts(x0,x1,y0,y1,normalize)
-                        Tarray[x0*self.ypoints+y0,x1*solvey+y1] = mid[0]
-                        Tarray[x0*self.ypoints+y0,x1*solvey+y1+solvesize] = mid[1]
-                        Tarray[x0*self.ypoints+y0,x1*solvey+y1+solvesize*2] = mid[2]
-                        Tarray[x0 * self.ypoints + y0+size, x1*solvey+y1] = mid[3]
-                        Tarray[x0 * self.ypoints + y0+size, x1*solvey+y1+solvesize] = mid[4]
-                        Tarray[x0 * self.ypoints + y0+size, x1*solvey+y1+solvesize*2] = mid[5]
-                        Tarray[x0 * self.ypoints + y0+size*2, x1*solvey+y1] = mid[6]
-                        Tarray[x0 * self.ypoints + y0+size*2, x1*solvey+y1+solvesize] = mid[7]
-                        Tarray[x0 * self.ypoints + y0+size*2, x1*solvey+y1+solvesize*2] = mid[8]
-                        Tarray[x0 * self.ypoints + y0+size*3, x1 * solvey + y1] = mid[9]
-                        Tarray[x0 * self.ypoints + y0+size*3, x1*solvey+y1+solvesize] = mid[10]
-                        Tarray[x0 * self.ypoints + y0+size*3, x1*solvey+y1+solvesize*2] = mid[11]
-                        bar.update(cnt)
-
-        return Tarray
-
-    def solve(self, E, H, b=0, save=False, limits=(5,1e-9),itera=False):
-        if save:
-            if os.path.isfile("T.npy"):
-                T = np.matrix(np.load("T.npy"))
-            else:
-                T = self.T(normalize=True)
-                np.save("T.npy", T)
-            if os.path.isfile("VH.npy") and os.path.isfile("S.npy") and os.path.isfile("U.npy"):
-                VH = np.matrix(np.load("VH.npy"))
-                U = np.matrix(np.load("U.npy"))
-                S = np.load("S.npy")
-            else:
-                U, S, VH = np.linalg.svd(T)
-                VH = np.matrix(VH)
-                np.save("S.npy", S)
-                np.save("VH.npy", VH)
-                np.save("U.npy", U)
-            if os.path.isfile("F.npy"):
-                F = np.load("F.npy")
-            else:
-                Ex = np.reshape([e[0] / self.Emax for e in E], (1, -1))
-                Ey = np.reshape([e[1] / self.Emax  for e in E], (1, -1))
-                Hx = np.reshape([h[0] / self.Hmax for h in H], (1, -1))
-                Hy = np.reshape([h[1] / self.Hmax for h in H], (1, -1))
-                E = np.append(Ex, Ey)
-                H = np.append(Hx, Hy)
-                F = np.reshape([E, H], (1, -1)).T
-                np.save("F.npy", F)
-        else:
-            T = np.matrix(self.T(normalize=True))
-            # U, S, VH = np.linalg.svd(T)
-            # VH = np.matrix(VH)
-            Ex = np.reshape([e[0] / self.Emax for e in E], (1, -1))
-            Ey = np.reshape([e[1] / self.Emax for e in E], (1, -1))
-            Hx = np.reshape([h[0] / self.Hmax for h in H], (1, -1))
-            Hy = np.reshape([h[1] / self.Hmax for h in H], (1, -1))
-            E = np.append(Ex, Ey)
-            H = np.append(Hx, Hy)
-            F = np.reshape([E, H], (1, -1)).T
-            np.save("T.npy", T)
-            # np.save("S.npy", S)
-            # np.save("VH.npy", VH)
-            # np.save("U.npy", U)
-            np.save("F.npy", F)
-
-        # TH = T.H
-        # V = np.array(VH.H)
-        #
-        # if itera:
-        #     scope=[limits[0],(limits[0]+limits[1])/2,limits[1]]
-        #     tol=[-1]*3
-        #     mintor=1e5
-        #     midtor=1e5
-        #     cnt=0
-        #     while True:
-        #         for i in range(3):
-        #             if tol[i]==-1:
-        #                 ambda=scope[i]*S[0]
-        #                 S_ = np.diag([1 / (xi ** 2 + ambda ** 2) for xi in S])
-        #                 X = V @ S_ @ VH @ TH @ F
-        #                 Fs = T @ X
-        #                 sigmaEx = diff(Fs[0:2601], F[0:2601])
-        #                 sigmaEy = diff(Fs[2601:5202], F[2601:5202])
-        #                 sigmaHx = diff(Fs[5202:7803], F[5202:7803])
-        #                 sigmaHy = diff(Fs[7803:10404], F[7803:10404])
-        #                 tol[i]=diff(Fs,F)
-        #                 print(f"for {scope[i]} tol: {tol[i]}\n"
-        #                       f"Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
-        #             if tol[i]<mintor:
-        #                 midtor = mintor
-        #                 mintor = tol[i]
-        #             elif mintor<tol[i]<midtor:
-        #                 midtor = tol[i]
-        #         if midtor!=tol[i] and mintor!=tol[i]:
-        #             midtor = tol[i]
-        #         newmax = scope[tol.index(midtor)]
-        #         newmin = scope[tol.index(mintor)]
-        #         scope = [newmax, (newmin + newmax) / 2, newmin]
-        #         tol = [midtor, -1, mintor]
-        #         cnt += 1
-        #         if (midtor-mintor)<1e-12:
-        #             print(f"can't find best solution\nepoches:{cnt},scope:{scope},tol:{tol}")
-        #             break
-        #         print(f"epoches:{cnt},scope:{scope},tol:{tol}")
-        #         if mintor<0.1:
-        #             print(f"find best solution b={scope[2]} in {cnt} epoch,tolerance is {tol[2]}\n"
-        #                   f"Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
-        #             break
-        # else:
-        #     ambda = b*S[0]
-        #     S = np.diag([1/(xi**2+ambda**2) for xi in S])
-        #     X = V@S@VH@TH@F
-        #     Fs = T@X
-        #     sigmaEx = diff(Fs[0:2601],F[0:2601])
-        #     sigmaEy = diff(Fs[2601:5202], F[2601:5202])
-        #     sigmaHx = diff(Fs[5202:7803], F[5202:7803])
-        #     sigmaHy = diff(Fs[7803:10404], F[7803:10404])
-        #     print(sigmaEx,sigmaEy,sigmaHx,sigmaHy)
-        #
-        # self.X=X
-        T = np.array(T)
-        X = np.linalg.lstsq(T,F,rcond=None)[0]
-        return X
+		self.A = A
+		np.save("tmp\A.npy",A)
 
 
-    # def far(self):
+	def solve(self, swarm_size = 100, options = {'c1': 1.2, 'c2': 1.2, 'w': 0.9}):
+		self.A_build()
+		dim = 4*self.rebuild.total
+		A = self.A
+		H = self.H
+		# def func(X):
+		# 	F = np.zeros(swarm_size)
+		# 	for i in range(swarm_size):
+		# 		D = np.zeros(2*self.rebuild.total,dtype=complex)
+		# 		for j in range(2*self.rebuild.total):
+		# 			D[j]=X[i][j*2]+1j*X[i][j*2+1]
+		# 		H_dipole = A @ D
+		# 		f = np.mean(abs(H - H_dipole)/abs(H))
+		# 		F[i] = f
+		#
+		# 	return F
 
-        
-        
+		from sko.GA import GA
+		def func(p):
+			D = np.zeros(2 * self.rebuild.total, dtype=complex)
 
+			for j in range(2*self.rebuild.total):
+				D[j]=p[j*2]+1j*p[j*2+1]
+			H_dipole = A @ D
+			f = np.mean(abs(H - H_dipole)/abs(H))
+			return  f
+
+		ga = GA(func=func, n_dim=dim, size_pop=50, max_iter=800, prob_mut=0.001,precision=1e-7)
+		x,y=ga.run()
+		print(x)
+
+		# optimizer = ps.single.GlobalBestPSO(n_particles=swarm_size,
+		# 									dimensions=dim,
+		# 									options=options)
+		# cost, dipole = optimizer.optimize(func, iters=2000)
+		# return cost, dipole
 
 
 
 
 if __name__ == "__main__":
-    print(e)
+	print(e)
 
 
