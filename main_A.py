@@ -1,0 +1,52 @@
+import load
+from rebuild import Rebuilder
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+if __name__ == "__main__":
+    Edataloader = load.DataLoader("E_origin.fld")
+    Hdataloader = load.DataLoader("H_origin.fld")
+    E,h,xpoints,xstep,ypoints,ystep = Edataloader.get_data()
+    H,_,_,_,_,_ = Hdataloader.get_data()
+    rebuilder = Rebuilder(E,H,h,xstep,ystep,xpoints,ypoints,dxlenth=0.104,dylenth=0.104,dxpoints=26,dypoints=26,f=5e9)
+    dipole = rebuilder.solve()
+    Hdataloader = load.DataLoader("H_origin.fld")
+    H, h, xpoints, xstep, ypoints, ystep = Hdataloader.get_data()
+    farrebuilder = Rebuilder(E,H,h,xstep,ystep,xpoints,ypoints,dxlenth=0.104,dylenth=0.104,dxpoints=26,dypoints=26,f=5e9)
+    farrebuilder.A_build()
+    H_diople = farrebuilder.A@dipole
+    plt.figure()
+    sns.heatmap(np.angle(H_diople[:729]).reshape((27, 27)), cmap="YlOrRd")
+    plt.title("Custom Labeled Heatmap")
+    plt.show()
+    plt.figure()
+    sns.heatmap(np.angle(H[:729]).reshape((27, 27)), cmap="YlOrRd")
+    plt.title("Custom Labeled Heatmap")
+    plt.show()
+    print(f"Hx={np.linalg.norm(H_diople[:729]-H[:729])}")
+    plt.figure()
+    sns.heatmap(np.angle(H_diople[729:1458]).reshape((27, 27)), cmap="YlOrRd")
+    plt.title("Custom Labeled Heatmap")
+    plt.show()
+    print(f"Hy={np.linalg.norm(H_diople[729:1458]-H[729:1458])}")
+    plt.figure()
+    sns.heatmap(np.angle(H[729:1458]).reshape((27, 27)), cmap="YlOrRd")
+    plt.title("Custom Labeled Heatmap")
+    plt.show()
+    plt.figure()
+    sns.heatmap(np.angle(H_diople[1458:2187]).reshape((27, 27)), cmap="YlOrRd")
+    plt.title("Custom Labeled Heatmap")
+    plt.show()
+    plt.figure()
+    sns.heatmap(np.angle(H[1458:2187]).reshape((27, 27)), cmap="YlOrRd")
+    plt.title("Custom Labeled Heatmap")
+    plt.show()
+    print(f"Hz={np.linalg.norm(H_diople[1458:2187] - H[1458:2187])}")
+
+
+
+
+
+
+

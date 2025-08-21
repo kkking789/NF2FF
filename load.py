@@ -26,7 +26,11 @@ class DataLoader:
     def get_data(self):
         output = [(data[3]*e**(data[4]*1j),data[5]*e**(data[6]*1j),data[7]*e**(data[8]*1j)) for data in self.data]
         h = self.data[0][2]
-        return output, h, self.xpoints, self.xstep, self.ypoints, self.ystep
+        outputlist=[]
+        for i in range(3):
+            for data in output:
+                outputlist.append(data[i])
+        return np.array(outputlist), h, self.xpoints, self.xstep, self.ypoints, self.ystep
 
 
 

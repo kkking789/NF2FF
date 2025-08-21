@@ -1,36 +1,49 @@
 import numpy as np
-from math import e
-from rebuild import diff
+from math import cos, sin, pi
 
 
 class Far:
-    def __init__(self, X, rebuilder):
+    def __init__(self, X, rebuilder, num=360, r=300):
         self.X=X
-        self.xpoints=rebuilder.solvex
-        self.ypoints=rebuilder.solvey
+        self.k = rebuilder.k
+        self.K_h = rebuilder.K_h
+        self.K_e = rebuilder.K_e
         self.rebuilder=rebuilder
-        self.T = []
+        self.measure = rebuilder.measure
+        self.rebuild = rebuilder.rebuild
+        self.num = num
+        self.r = r
 
-    def near(self,H,E,h):
-        self.rebuilder.h=h
-        self.T=self.rebuilder.T(normalize=False)
-        np.save(f"T{self.rebuilder.h}",self.T)
-        Ex = np.reshape([e[0] for e in E], (1, -1))
-        Ey = np.reshape([e[1] for e in E], (1, -1))
-        Hx = np.reshape([h[0] for h in H], (1, -1))
-        Hy = np.reshape([h[1] for h in H], (1, -1))
-        E = np.append(Ex, Ey)
-        H = np.append(Hx, Hy)
-        F = np.append(E, H)
-        Fs = np.array(self.T) @ np.array(self.X)
-        sigmaEx = diff(Fs[0:2601], F[0:2601])
-        sigmaEy = diff(Fs[2601:5202], F[2601:5202])
-        sigmaHx = diff(Fs[5202:7803], F[5202:7803])
-        sigmaHy = diff(Fs[7803:10404], F[7803:10404])
-        tol=diff(Fs,F)
-        print(f"tol: {tol},Ex:{sigmaEx},Ey:{sigmaEy},Hx:{sigmaHx},Hy:{sigmaHy}")
-        np.save(f"E_{h}",abs(E))
-        np.save(f"E_rebuild",abs(Fs))
+
+    def farbuilder(self):
+        gamma_E = self.K_e
+        gamma_H = self.K_h
+        k = self.k
+        r=self.r
+        X = self.X
+        anglestep = 2*pi/self.num
+        measure = self.measure  # 测量点网格
+        rebuild = self.rebuild  # 重建点网格
+
+        for M in range(self.num):
+            Ex=0
+            Ey=0
+            Ez=0
+            Hx=0
+            Hy=0
+            Hz=0
+            angle = anglestep*M
+            for m in range(rebuild.total):
+                Pz = X[m]
+                Mx = X[m+rebuild.total]
+                My = X[m+rebuild.total*2]
+                Ex += (sin(angle)*cos(angle)*-1*2*Pz+sin(angle)*1j*2*k*My)*gamma_E
+                Ey += (-1*sin(angle)*2*1j*k*Mx)*gamma_E
+                Ez += (cos(angle)**2*2*Pz+-1*cos(angle)*1j*2*My)*gamma_E
+
+
+
+
 
 
 
