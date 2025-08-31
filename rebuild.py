@@ -5,7 +5,9 @@ from math import e
 import numpy as np
 import pyswarms as ps
 from sko.DE import DE
+import random
 from sko.SA import SA
+from sko.GA import GA
 
 
 class ProgressBar:
@@ -402,8 +404,31 @@ class Rebuilder:
 			# for j in range(2 * self.rebuild.total):
 			# 	X[j] = pos[j * 2] + 1j * pos[j * 2 + 1]
 
-			X = np.linalg.lstsq(A,H,rcond=None)[0]
-			return X
+			def func(X):
+				D = np.zeros(2 * self.rebuild.total, dtype=complex)
+				for j in range(2*self.rebuild.total):
+					D[j]=X[j*2]+1j*X[j*2+1]
+				H_dipole = A @ D
+				f = np.mean(np.abs(np.angle(H_dipole)-np.angle(H)))*1+np.linalg.norm(H_dipole-H)*0
+				print('\r', f, end='')
+				return f
+
+			de = DE(func=func, n_dim=4*self.rebuild.total, size_pop=50, max_iter=1000)
+			if os.path.exists("output/A_DE.npy"):
+				D = np.load("output/A_DE.npy")
+			else:
+				D = np.linalg.lstsq(A, H, rcond=None)[0]
+			for j in range(2 * self.rebuild.total):
+				for i in range(50):
+					de.X[i][j*2] = np.real(D[j])*(1 + 5*random.random())
+					de.X[i][j*2+1] = np.imag(D[j])*(1 + 5*random.random())
+			X,_ = de.run()
+			D = np.zeros(2 * self.rebuild.total, dtype=complex)
+			for j in range(2 * self.rebuild.total):
+				D[j] = X[j * 2] + 1j * X[j * 2 + 1]
+			# X = np.linalg.lstsq(A,H,rcond=None)[0]
+			np.save("output/A_DE.npy", D)
+			return D
 		elif state == "Q":
 			Emax = np.max(np.abs(self.E))
 			Hmax = np.max(np.abs(self.H))
